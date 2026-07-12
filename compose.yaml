@@ -1,13 +1,5 @@
 services:
-  app:
-    build:
-      context: .
-      dockerfile: Dockerfile
+  codex-limit-auto-reset:
+    image: ghcr.io/fa0311/codex-limit-auto-reset
+    container_name: codex-limit-auto-reset
     restart: unless-stopped
-    volumes:
-      - codex-home:/data/codex
-    env_file:
-      - .env
-
-volumes:
-  codex-home:
