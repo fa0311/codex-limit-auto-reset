@@ -1,0 +1,13 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    volumes:
+      - codex-home:/data/codex
+    env_file:
+      - .env
+
+volumes:
+  codex-home:
