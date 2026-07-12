@@ -13,13 +13,6 @@ RUN pnpm prune --prod
 
 FROM node:24-bookworm-slim AS runtime
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-    bubblewrap \
-    ca-certificates \
-    git \
-    && rm -rf /var/lib/apt/lists/*
-
 RUN npm install --global @openai/codex@0.144.1
 
 ENV CODEX_HOME=/data/codex
