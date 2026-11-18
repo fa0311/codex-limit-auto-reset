@@ -60,6 +60,10 @@ Between checks the worker sleeps until the next credit becomes due, and wakes at
 least once a day to pick up newly granted credits. Credits that never expire are
 left alone.
 
+app-server can report only how many credits are available, without their
+expiry times. The worker then logs `credit_details_unavailable` and asks again
+ten minutes later instead of waiting for the daily scan.
+
 ## Configuration
 
 The following environment variables are available:
@@ -88,6 +92,7 @@ Events:
 - `credit_redemption_result`: `credit_id`, `attempt`, and the returned `outcome`.
 - `credit_redemption_error`: `credit_id`, `attempt`, and the failure for each failed RPC attempt.
 - `check_failed`: `operation` (`initialize` or `check`) and the failure when the worker terminates unsuccessfully.
+- `credit_details_unavailable`: `available_count` when app-server reported credits without their expiry times.
 - `next_check`: `delay_ms` until the next scheduled scan, including the daily scan when no credits are eligible.
 
 Count **only** `credit_redemption_result` with `outcome: "reset"` as confirmed

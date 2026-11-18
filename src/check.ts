@@ -5,6 +5,8 @@ import type { Logger } from "./log.ts";
 import { retry } from "./retry.ts";
 
 const RESCAN_INTERVAL_MS = 24 * 60 * 60 * 1000;
+// How soon to ask again when app-server could not say when the credits expire.
+const DETAILS_RETRY_INTERVAL_MS = 10 * 60 * 1000;
 const MIN_RECHECK_INTERVAL_MS = 60 * 1000;
 type Client = Pick<CodexClient, "refreshAccount" | "readCredits" | "consumeCredit">;
 
@@ -29,6 +31,12 @@ export const checkCredits = async (
     })
     .sort((a, b) => a.expiresAtMs - b.expiresAtMs);
   const due = credits.filter((credit) => credit.expiresAtMs - redeemBeforeMs <= now());
+
+  // app-server falls back to a bare count when its detail lookup fails, which hides every expiry time.
+  const detailsUnavailable = summary.availableCount > 0 && summary.credits.length === 0;
+  if (detailsUnavailable) {
+    log({ event: "credit_details_unavailable", available_count: summary.availableCount });
+  }
 
   const settled = new Set<string>();
   for (const credit of due) {
@@ -63,7 +71,11 @@ export const checkCredits = async (
   const upcoming = credits
     .filter((credit) => !due.includes(credit))
     .map((credit) => credit.expiresAtMs - redeemBeforeMs - now());
-  const nextCheckInMs = Math.min(...retries, ...upcoming, RESCAN_INTERVAL_MS);
+  const nextCheckInMs = Math.min(
+    ...retries,
+    ...upcoming,
+    detailsUnavailable ? DETAILS_RETRY_INTERVAL_MS : RESCAN_INTERVAL_MS,
+  );
   log({ event: "next_check", delay_ms: nextCheckInMs });
   return nextCheckInMs;
 };
