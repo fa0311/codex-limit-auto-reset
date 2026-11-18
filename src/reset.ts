@@ -1,19 +1,17 @@
 import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline/promises";
 import { runCommand } from "./command.ts";
-import { formatExpiry, parseLocale } from "./locale.ts";
 
-await runCommand(async (client) => {
-  const locale = parseLocale(process.env);
+await runCommand(async (client, { locale, timeZone }) => {
   const { credits } = (await client.readCredits()).rateLimitResetCredits;
-  const redeemable = credits
+  const redeemable = (credits ?? [])
     .filter(
       (credit) =>
         credit.status === "available" &&
         credit.resetType === "codexRateLimits" &&
-        (credit.expiresAt === null || credit.expiresAt * 1000 > Date.now()),
+        (credit.expiresAt === null || credit.expiresAt.getTime() > Date.now()),
     )
-    .sort((a, b) => (a.expiresAt ?? Infinity) - (b.expiresAt ?? Infinity));
+    .sort((a, b) => (a.expiresAt?.getTime() ?? Infinity) - (b.expiresAt?.getTime() ?? Infinity));
   const [next] = redeemable;
   if (!next) {
     console.log("No redeemable reset credits.");
@@ -24,7 +22,7 @@ await runCommand(async (client) => {
       id: credit.id,
       status: credit.status,
       resetType: credit.resetType,
-      expiresAt: formatExpiry(credit.expiresAt, locale),
+      expiresAt: credit.expiresAt?.toLocaleString(locale, { timeZone }) ?? "never",
     })),
   );
 

@@ -35,8 +35,7 @@ docker run -d \
   ghcr.io/fa0311/codex-limit-auto-reset
 ```
 
-The worker exits with status 1 when a check fails, so keep a restart policy on
-the container. The same commands are available inside it:
+The same commands are available inside the container:
 
 ```sh
 docker exec codex-limit-auto-reset node dist/cli.js
@@ -61,8 +60,14 @@ least once a day to pick up newly granted credits. Credits that never expire are
 left alone.
 
 app-server can report only how many credits are available, without their
-expiry times. The worker then logs `credit_details_unavailable` and asks again
-ten minutes later instead of waiting for the daily scan.
+expiry times. The worker then records `credit_details_unavailable` and asks
+again ten minutes later instead of waiting for the daily scan.
+
+Each check starts its own `codex app-server` and stops it afterwards, so nothing
+runs between checks and a Codex CLI update is picked up by the next one. A check
+that fails does not stop the worker: it is recorded and repeated after 1, 2, 4,
+... up to 15 minutes, until a check succeeds again. Logging in with `codex login`
+is enough to recover; there is no need to restart the worker.
 
 ## Configuration
 
@@ -72,10 +77,12 @@ The following environment variables are available:
 | --- | --- | --- |
 | `REDEEM_BEFORE_MINUTES` | `360` | How many minutes before expiration a credit should be redeemed |
 | `CODEX_BIN` | `codex` | Codex CLI command or path |
-| `LOCAL` | `en` | Locale for the dates printed by `start:cli` and `start:reset` |
+| `LOCALE` | `en` | Locale for the dates printed by `start:cli` and `start:reset` |
 | `TIMEZONE` | `UTC` | Time zone for those dates |
 
-Local runs also load variables from a `.env` file in the project root.
+Local runs also load variables from a `.env` file in the project root. An
+invalid value is the one thing that stops the worker: it records `worker_failed`
+and exits with status 1.
 
 ## Reset history
 
@@ -83,48 +90,45 @@ The background worker writes one JSON object per line to standard output. Each
 record includes an ISO 8601 UTC `timestamp`, `level`, and `event`:
 
 ```json
-{"timestamp":"2026-11-01T01:23:45.000Z","level":"info","event":"credit_redemption_result","credit_id":"example-credit","attempt":1,"outcome":"reset"}
+{"timestamp":"2026-11-01T01:23:45.000Z","level":"info","event":"credit_redemption_result","credit_id":"example-credit","outcome":"reset"}
 ```
 
 Events:
 
-- `credit_redemption_attempt`: `credit_id` and one-based `attempt` before each RPC attempt.
-- `credit_redemption_result`: `credit_id`, `attempt`, and the returned `outcome`.
-- `credit_redemption_error`: `credit_id`, `attempt`, and the failure for each failed RPC attempt.
-- `check_failed`: `operation` (`initialize` or `check`) and the failure when the worker terminates unsuccessfully.
+- `credit_redemption_attempt`: `credit_id`, before the request is sent.
+- `credit_redemption_result`: `credit_id` and the returned `outcome`.
 - `credit_details_unavailable`: `available_count` when app-server reported credits without their expiry times.
-- `next_check`: `delay_ms` until the next scheduled scan, including the daily scan when no credits are eligible.
+- `check_failed`: the failure that ended a check. The worker keeps running.
+- `worker_failed`: the failure that stopped the worker.
+- `next_check`: `delay_ms` until the next check.
 
 Count **only** `credit_redemption_result` with `outcome: "reset"` as confirmed
-resets. `nothingToReset`, `noCredit`, and `alreadyRedeemed` are separate results;
-failed attempts are not resets. Each redemption attempt has its own idempotency
-key (a UUID), which only the retries of that attempt reuse. If a reset succeeds
-remotely but its response is lost, a later `alreadyRedeemed` response cannot
-prove that this worker performed the reset; it is not counted as one. Logs
-report observed outcomes, not a transactional audit trail.
+resets. `nothingToReset`, `noCredit`, and `alreadyRedeemed` are separate results.
+A `credit_redemption_attempt` followed by `check_failed` is an attempt whose
+outcome is unknown: if it succeeded remotely, the next check reports
+`alreadyRedeemed`, which cannot prove that this worker performed the reset and
+is not counted as one. Every attempt sends its own idempotency key (a UUID).
+Logs report observed outcomes, not a transactional audit trail.
 
-A failure is an `error_type`, plus a one-line `detail` when the worker
-recognises the problem:
+A failure has an `error_type`, and a `detail` when the worker recognises the
+problem:
 
 | `error_type` | Meaning |
 | --- | --- |
-| `not_authenticated` | Codex is logged out, or not logged in with ChatGPT. Run `codex login`. |
-| `invalid_config` | An environment variable is invalid; `detail` names it. |
-| `rpc_error` | app-server answered a request with an error; `detail` has the method, code, and message. |
-| `request_timeout` | app-server did not answer within 30 seconds. |
-| `app_server_exited` | The Codex CLI could not be started, or it exited. |
-| `invalid_response` | app-server answered in a shape this version does not understand; `detail` names the field. |
-| `operation_failed` | Anything else. There is no `detail`. |
-
-A failed request is tried three times, 2 and 8 seconds apart, unless it cannot
-succeed (logged out, or a request app-server rejects as invalid).
+| `NotAuthenticatedError` | Codex is logged out, or not logged in with ChatGPT. Run `codex login`. |
+| `InvalidConfigError` | An environment variable is invalid; `detail` names it. |
+| `RpcError` | app-server answered a request with an error; `detail` has the method, code, and message. |
+| `RequestTimeoutError` | app-server did not answer within 30 seconds. |
+| `AppServerExitedError` | The Codex CLI could not be started, or it exited. |
+| `InvalidResponseError` | app-server answered in a shape this version does not understand; `detail` names the field. |
 
 `detail` is text the worker composes itself, plus app-server's own error
-message for `rpc_error`. Raw exceptions, stacks, and RPC payloads are never
-logged, since they may contain authentication data, which is why an error the
-worker does not recognise has no `detail`. Codex app-server's own diagnostic
-stderr remains separate from the worker's JSON stdout. The interactive CLI
-commands retain their human-readable output.
+message for `RpcError`. Any other error is unexpected. It may quote a payload,
+so it is printed in full to standard error, next to app-server's own
+diagnostics, and its record carries only the error's class name as
+`error_type`. Standard output therefore never contains raw exceptions, stacks,
+or RPC payloads. The interactive CLI commands retain their human-readable
+output.
 
 For systemd, the journal captures these records. A collector such as Alloy can
 forward them to Loki; the worker does not require a metrics server or a webhook.
@@ -139,15 +143,19 @@ pnpm build
 ```
 
 `pnpm check` runs the type check, Biome, and the tests. The tests never talk to
-Codex: the end-to-end ones start the real entry points against
-`test/fixtures/fake-codex.mjs`, a scripted stand-in for `codex app-server`, so
-no credit is spent. The same stand-in is handy for trying a change by hand:
+Codex, so no credit is spent: the client and the entry points run against
+`test/fixtures/fake-codex.mjs`, a scripted stand-in for `codex app-server`. The
+same stand-in is handy for trying a change by hand:
 
 ```sh
 CODEX_BIN=test/fixtures/fake-codex.mjs \
 FAKE_CODEX_SCENARIO='{"credits":{"availableCount":0,"credits":[]}}' \
 node src/main.ts
 ```
+
+The code follows the design rules in
+[typescript-design](https://github.com/fa0311/typescript-design-skill); see
+[AGENTS.md](./AGENTS.md) for how they apply here.
 
 ## License
 
