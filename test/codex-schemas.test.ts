@@ -46,11 +46,12 @@ describe("rateLimitCreditsSchema", () => {
 
   it("normalizes a null summary and a null credits list to empty lists", () => {
     expect(rateLimitCreditsSchema.parse({ rateLimits: {}, rateLimitResetCredits: null })).toEqual({
+      rateLimits: {},
       rateLimitResetCredits: { availableCount: 0, credits: [] },
     });
     expect(
       rateLimitCreditsSchema.parse({ rateLimits: {}, rateLimitResetCredits: { availableCount: 2, credits: null } }),
-    ).toEqual({ rateLimitResetCredits: { availableCount: 2, credits: [] } });
+    ).toEqual({ rateLimits: {}, rateLimitResetCredits: { availableCount: 2, credits: [] } });
   });
 
   it("keeps a never-expiring credit as null", () => {
@@ -77,4 +78,17 @@ describe("consumeCreditSchema", () => {
   it.each(["reset", "nothingToReset", "noCredit", "alreadyRedeemed"] as const)("parses outcome %s", (outcome) => {
     expect(consumeCreditSchema.parse({ outcome })).toEqual({ outcome });
   });
+});
+
+it("retains main-window usage from the app-server wire response", () => {
+  const response = rateLimitCreditsSchema.parse({
+    rateLimits: {
+      limitId: "codex",
+      primary: { usedPercent: 92, windowDurationMins: 300, resetsAt: 1800000000 },
+      secondary: null,
+    },
+    rateLimitResetCredits: null,
+  });
+  expect(response.rateLimits?.primary?.usedPercent).toBe(92);
+  expect(response.rateLimits?.primary?.resetsAt).toBe(1800000000);
 });
