@@ -50,3 +50,46 @@ pnpm build
 ## License
 
 [MIT](./LICENSE)
+
+## Nix
+
+The flake provides a package, worker and read-only credits apps, and a development
+shell for x86_64/aarch64 Linux and macOS:
+
+```sh
+nix build
+nix run .#credits
+nix run
+nix develop
+```
+
+An authenticated Codex CLI must be on `PATH`, or specified with `CODEX_BIN`.
+The package uses your existing Codex installation and credentials. Environment
+variables such as `CODEX_HOME` and `REDEEM_BEFORE_MINUTES` are passed through;
+unlike `pnpm start`, the packaged executables do not load a local `.env` file.
+
+From another flake, use `inputs.codex-limit-auto-reset.packages.${system}.default`
+with the input URL `github:fa0311/codex-limit-auto-reset`. The package installs
+`codex-limit-auto-reset` and `codex-limit-auto-reset-cli`, which can also be used
+in a Home Manager or systemd service. `nix flake check` builds the package for
+the current system.
+
+### Home Manager (Linux)
+
+Import `inputs.codex-limit-auto-reset.homeManagerModules.default` and enable:
+
+```nix
+services.codex-limit-auto-reset = {
+  enable = true;
+  redeemBeforeMinutes = 360;
+  # codexPackage = pkgs.codex;
+  # codexHome = "${config.home.homeDirectory}/.codex";
+};
+```
+
+This starts a systemd user service and restarts it on failure. `codexPackage`
+defaults to the package configured by `programs.codex` when enabled, otherwise
+`pkgs.codex`; `codexHome` respects `home.sessionVariables.CODEX_HOME`.
+Authenticate with that Codex installation before enabling the service. Use
+`journalctl --user -u codex-limit-auto-reset` to inspect the worker.
+The package and Home Manager module are maintained here rather than requiring NUR.
