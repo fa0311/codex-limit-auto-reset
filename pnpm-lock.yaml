@@ -11,9 +11,6 @@ importers:
       execa:
         specifier: 10.2.1
         version: 10.2.1
-      split2:
-        specifier: 4.2.0
-        version: 4.2.0
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -24,9 +21,6 @@ importers:
       '@types/node':
         specifier: 24.19.2
         version: 24.19.2
-      '@types/split2':
-        specifier: 4.2.3
-        version: 4.2.3
       typescript:
         specifier: 7.0.2
         version: 7.0.2
@@ -259,9 +253,6 @@ packages:
 
   '@types/node@24.19.2':
     resolution: {integrity: sha512-93d49wCWJkCyN87MxLpNN6KXPCwFw7bVUg79mGUV1OS40JGWwVCr8n61DXCSqz7CV6/VfPkb7xec7uP2M+QHWQ==}
-
-  '@types/split2@4.2.3':
-    resolution: {integrity: sha512-59OXIlfUsi2k++H6CHgUQKEb2HKRokUA39HY1i1dS8/AIcqVjtAAFdf8u+HxTWK/4FUHMJQlKSZ4I6irCBJ1Zw==}
 
   '@typescript/typescript-aix-ppc64@7.0.2':
     resolution: {integrity: sha512-MTKKkWB7p/0E9xi1d1tHtZ5PiLkGEMIq88pK2CubZjOsLtYTLqhgIgi6zepFa+9GHZ6h05NMCkQxGKiPXMxXtQ==}
@@ -587,10 +578,6 @@ packages:
     resolution: {integrity: sha512-KGj/8Y43x35aZVDtt+J4mK1hoLGHULMYfSkODJNQjNDC3oW1PqPoxMwo0pLUsWM/UEGzON/NxeHywEfNXNP3Vw==}
     engines: {node: '>=0.10.0'}
 
-  split2@4.2.0:
-    resolution: {integrity: sha512-UcjcJOWknrNkF6PLX83qcHM6KHgVKNkV62Y8a5uYDVv9ydGQVwAHMKqHdJje1VTWpljG0WYpCDhrCdAOYH4TWg==}
-    engines: {node: '>= 10.x'}
-
   std-env@4.3.0:
     resolution: {integrity: sha512-OtU/EgQ1kIm5KwqQpBC6ZEMXrZRui11w8zgfTWp8cdO9B8OaPsbA8bTHO2P+HNo1VlUTGMVBwPhydu6poeXiag==}
 
@@ -881,10 +868,6 @@ snapshots:
     dependencies:
       undici-types: 7.24.6
 
-  '@types/split2@4.2.3':
-    dependencies:
-      '@types/node': 24.19.2
-
   '@typescript/typescript-aix-ppc64@7.0.2':
     optional: true
 
@@ -1114,8 +1097,6 @@ snapshots:
   signal-exit@4.1.0: {}
 
   source-map-js@1.2.2: {}
-
-  split2@4.2.0: {}
 
   std-env@4.3.0: {}
 

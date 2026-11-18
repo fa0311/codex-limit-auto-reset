@@ -34,15 +34,16 @@ export const rpcMessageSchema = z.xor([
     })),
 ]);
 
-export type RpcMessage = z.infer<typeof rpcMessageSchema>;
-
-// GetAccountResponse: account is a tagged enum ("apiKey" | "chatgpt" | "amazonBedrock") or null.
+// GetAccountResponse: account is a tagged enum ("apiKey" | "chatgpt" | "amazonBedrock" | "gcp") or null.
 export const accountSchema = z.object({
   account: z.object({ type: z.string() }).nullable(),
 });
-export type Account = z.infer<typeof accountSchema>;
 
-// GetAccountRateLimitsResponse.rateLimitResetCredits: summary and its credits list are both nullable.
+// Unix timestamp in seconds.
+const timestampSchema = z.int().transform((seconds) => new Date(seconds * 1000));
+
+// GetAccountRateLimitsResponse.rateLimitResetCredits. A null summary means there is nothing to
+// report. Null `credits` means only the count is known, because app-server's detail lookup failed.
 export const rateLimitCreditsSchema = z.object({
   rateLimitResetCredits: z
     .object({
@@ -53,19 +54,19 @@ export const rateLimitCreditsSchema = z.object({
             id: z.string().min(1),
             resetType: z.enum(["codexRateLimits", "unknown"]).catch("unknown"),
             status: z.enum(["available", "redeeming", "redeemed", "unknown"]).catch("unknown"),
-            grantedAt: z.int(),
-            expiresAt: z.int().nullable(),
+            grantedAt: timestampSchema,
+            expiresAt: timestampSchema.nullable(),
           }),
         )
-        .nullish()
-        .transform((credits) => credits ?? []),
+        .nullable(),
     })
-    .nullish()
+    .nullable()
     .transform((summary) => summary ?? { availableCount: 0, credits: [] }),
 });
-export type RateLimitCredits = z.infer<typeof rateLimitCreditsSchema>;
+export type RateLimitCredits = z.output<typeof rateLimitCreditsSchema>;
+export type Credit = NonNullable<RateLimitCredits["rateLimitResetCredits"]["credits"]>[number];
 
 export const consumeCreditSchema = z.object({
   outcome: z.enum(["reset", "nothingToReset", "noCredit", "alreadyRedeemed"]),
 });
-export type ConsumeCredit = z.infer<typeof consumeCreditSchema>;
+export type ConsumeCredit = z.output<typeof consumeCreditSchema>;

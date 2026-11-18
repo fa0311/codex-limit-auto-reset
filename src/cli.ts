@@ -1,15 +1,13 @@
 import { runCommand } from "./command.ts";
-import { formatExpiry, parseLocale } from "./locale.ts";
 
-await runCommand(async (client) => {
-  const locale = parseLocale(process.env);
+await runCommand(async (client, { locale, timeZone }) => {
   const { availableCount, credits } = (await client.readCredits()).rateLimitResetCredits;
+  if (credits === null) {
+    console.log(`${availableCount} reset credit(s) available, but app-server could not load their details.`);
+    return;
+  }
   if (credits.length === 0) {
-    console.log(
-      availableCount > 0
-        ? `${availableCount} reset credit(s) available, but their details could not be loaded. Try again shortly.`
-        : "No reset credits.",
-    );
+    console.log("No reset credits.");
     return;
   }
   console.table(
@@ -17,7 +15,7 @@ await runCommand(async (client) => {
       id: credit.id,
       status: credit.status,
       resetType: credit.resetType,
-      expiresAt: formatExpiry(credit.expiresAt, locale),
+      expiresAt: credit.expiresAt?.toLocaleString(locale, { timeZone }) ?? "never",
     })),
   );
 });

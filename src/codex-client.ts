@@ -1,15 +1,19 @@
+import { createInterface } from "node:readline";
 import { execa } from "execa";
-import split2 from "split2";
-import type { z } from "zod";
-import type { RpcMessage } from "./codex-schemas.ts";
+import { z } from "zod";
+import { clientInfo } from "./client-info.ts";
 import { accountSchema, consumeCreditSchema, rateLimitCreditsSchema, rpcMessageSchema } from "./codex-schemas.ts";
-import { CodexError, describeIssues } from "./errors.ts";
+import type { CodexError } from "./errors.ts";
+import {
+  AppServerExitedError,
+  InvalidResponseError,
+  NotAuthenticatedError,
+  RequestTimeoutError,
+  RpcError,
+} from "./errors.ts";
 
-// Longer than app-server's own 10 second backend timeout, so its answer arrives before this one fires.
+// Longer than the 10 seconds app-server itself allows the backend, so that its answer arrives first.
 const REQUEST_TIMEOUT_MS = 30_000;
-
-// JSON-RPC codes for a request the server will never accept; sending it again cannot help.
-const INVALID_REQUEST_CODES = new Set([-32700, -32600, -32601, -32602]);
 
 type PendingRequest = {
   readonly method: string;
@@ -17,34 +21,29 @@ type PendingRequest = {
   readonly resolve: (value: unknown) => void;
 };
 
-type CodexClientOptions = {
-  readonly command: string;
-  readonly clientInfo: {
-    readonly name: string;
-    readonly title: string;
-    readonly version: string;
-  };
-};
-
-const parseResult = <T extends z.ZodType>(schema: T, method: string, result: unknown): z.output<T> => {
+const parseResult = <T extends z.ZodType>(schema: T, method: string, result: unknown) => {
   const parsed = schema.safeParse(result);
   if (!parsed.success) {
-    throw new CodexError("invalid_response", `Unexpected ${method} response: ${describeIssues(parsed.error)}`, false);
+    throw new InvalidResponseError(`Unexpected ${method} response\n${z.prettifyError(parsed.error)}`, {
+      cause: parsed.error,
+    });
   }
   return parsed.data;
 };
 
-export const createCodexClient = ({ command, clientInfo }: CodexClientOptions) => {
+/** Starts `codex app-server`, completes the handshake, and stops the process when disposed. */
+export const createCodexClient = async (command: string) => {
   const subprocess = execa(command, ["app-server", "--stdio"], {
     buffer: false,
-    cleanup: true,
     reject: false,
     stderr: "inherit",
     stdin: "pipe",
     stdout: "pipe",
   });
-  const stdin = subprocess.writable();
-  const messages = subprocess.readable().pipe(split2((line: string) => rpcMessageSchema.parse(JSON.parse(line))));
+  using cleanup = new DisposableStack();
+  cleanup.defer(() => {
+    subprocess.kill();
+  });
 
   let nextId = 1;
   let failure: CodexError | undefined;
@@ -61,34 +60,32 @@ export const createCodexClient = ({ command, clientInfo }: CodexClientOptions) =
     }
   };
 
-  messages.on("data", (message: RpcMessage) => {
-    // Notifications and server-initiated requests are not used.
-    if (message.type === "request") {
-      return;
+  const read = async () => {
+    for await (const line of createInterface({ input: subprocess.stdout })) {
+      const message = rpcMessageSchema.parse(JSON.parse(line));
+      // Notifications and server-initiated requests are not used.
+      if (message.type === "request") {
+        continue;
+      }
+      const request = pending.get(message.id);
+      if (!request) {
+        continue;
+      }
+      pending.delete(message.id);
+      if (message.type === "response") {
+        request.resolve(message.result);
+      } else {
+        request.reject(new RpcError(`${request.method} failed (${message.error.code}): ${message.error.message}`));
+      }
     }
-    const request = pending.get(message.id);
-    if (!request) {
-      return;
-    }
-    pending.delete(message.id);
-    if (message.type === "response") {
-      request.resolve(message.result);
-      return;
-    }
-    const { code, message: reason } = message.error;
-    request.reject(
-      new CodexError("rpc_error", `${request.method} failed (${code}): ${reason}`, !INVALID_REQUEST_CODES.has(code)),
-    );
+  };
+  read().catch((cause: unknown) => {
+    fail(new InvalidResponseError("Codex app-server sent a message that could not be parsed", { cause }));
   });
-  // The raw parse error quotes the offending line, so it is replaced rather than passed on.
-  messages.on("error", () => {
-    fail(new CodexError("invalid_response", "Codex app-server sent a message that could not be parsed", false));
-  });
-  // A write fails only once the process is gone; its exit, reported below, says why.
-  stdin.on("error", () => {});
+  // A write fails only once the process is gone, and its exit, reported below, says why.
+  subprocess.stdin.on("error", () => {});
   void subprocess.then((result) => {
-    const reason = result.shortMessage ?? `exit code ${result.exitCode}`;
-    fail(new CodexError("app_server_exited", `Codex app-server exited: ${reason}`, false));
+    fail(new AppServerExitedError(`Codex app-server exited: ${result.shortMessage ?? `exit code ${result.exitCode}`}`));
   });
 
   const request = async (method: string, params?: unknown) => {
@@ -101,9 +98,9 @@ export const createCodexClient = ({ command, clientInfo }: CodexClientOptions) =
     pending.set(id, { method, ...deferred });
     const timeout = setTimeout(() => {
       pending.delete(id);
-      deferred.reject(new CodexError("request_timeout", `Codex app-server request timed out: ${method}`, true));
+      deferred.reject(new RequestTimeoutError(`Codex app-server request timed out: ${method}`));
     }, REQUEST_TIMEOUT_MS);
-    stdin.write(`${JSON.stringify({ id, method, params })}\n`);
+    subprocess.stdin.write(`${JSON.stringify({ id, method, params })}\n`);
     try {
       return await deferred.promise;
     } finally {
@@ -111,39 +108,32 @@ export const createCodexClient = ({ command, clientInfo }: CodexClientOptions) =
     }
   };
 
-  const initialize = async () => {
-    await request("initialize", { clientInfo });
-    stdin.write(`${JSON.stringify({ method: "initialized" })}\n`);
-  };
+  await request("initialize", { clientInfo });
+  subprocess.stdin.write(`${JSON.stringify({ method: "initialized" })}\n`);
 
-  const refreshAccount = async () => {
-    const method = "account/read";
-    const account = parseResult(accountSchema, method, await request(method, { refreshToken: true }));
-    if (account.account?.type !== "chatgpt") {
-      throw new CodexError("not_authenticated", "Codex CLI is not authenticated with ChatGPT", false);
-    }
-  };
-
-  const readCredits = async () => {
-    const method = "account/rateLimits/read";
-    return parseResult(rateLimitCreditsSchema, method, await request(method));
-  };
-
-  /** `idempotencyKey` identifies one redemption attempt: reuse it to retry that attempt, never for a later one. */
-  const consumeCredit = async (creditId: string, idempotencyKey: string) => {
-    const method = "account/rateLimitResetCredit/consume";
-    return parseResult(consumeCreditSchema, method, await request(method, { creditId, idempotencyKey }));
-  };
-
+  const closer = cleanup.move();
   return {
-    close: () => {
-      subprocess.kill();
+    /** Refreshes the login and fails unless it is a ChatGPT account, the only kind with reset credits. */
+    refreshAccount: async () => {
+      const method = "account/read";
+      const { account } = parseResult(accountSchema, method, await request(method, { refreshToken: true }));
+      if (account?.type !== "chatgpt") {
+        throw new NotAuthenticatedError("Codex CLI is not authenticated with ChatGPT");
+      }
     },
-    consumeCredit,
-    initialize,
-    readCredits,
-    refreshAccount,
+    readCredits: async () => {
+      const method = "account/rateLimits/read";
+      return parseResult(rateLimitCreditsSchema, method, await request(method));
+    },
+    /** `idempotencyKey` identifies one redemption attempt: a later attempt on the same credit needs a new one. */
+    consumeCredit: async (creditId: string, idempotencyKey: string) => {
+      const method = "account/rateLimitResetCredit/consume";
+      return parseResult(consumeCreditSchema, method, await request(method, { creditId, idempotencyKey }));
+    },
+    [Symbol.dispose]: () => {
+      closer.dispose();
+    },
   };
 };
 
-export type CodexClient = ReturnType<typeof createCodexClient>;
+export type CodexClient = Awaited<ReturnType<typeof createCodexClient>>;
