@@ -55,6 +55,13 @@ describe("rateLimitCreditsSchema", () => {
     expect(parse(null)).toEqual({ availableCount: 0, credits: [] });
   });
 
+  it("reads a nullable field that is absent as null", () => {
+    const { expiresAt: _, ...withoutExpiry } = credit;
+    expect(parse(undefined)).toEqual({ availableCount: 0, credits: [] });
+    expect(parse({ availableCount: 2 })).toEqual({ availableCount: 2, credits: null });
+    expect(parse({ availableCount: 1, credits: [withoutExpiry] }).credits?.[0]?.expiresAt).toBeNull();
+  });
+
   it("maps a status or resetType from a newer server to unknown", () => {
     const parsed = parse({ availableCount: 1, credits: [{ ...credit, status: "brandNew", resetType: "brandNew" }] });
     expect(parsed.credits?.[0]).toMatchObject({ status: "unknown", resetType: "unknown" });

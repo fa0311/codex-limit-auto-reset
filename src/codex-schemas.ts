@@ -34,9 +34,12 @@ export const rpcMessageSchema = z.xor([
     })),
 ]);
 
+// The protocol's JSON Schema requires none of the nullable fields read here, so each of them
+// accepts being absent as well as null.
+
 // GetAccountResponse: account is a tagged enum ("apiKey" | "chatgpt" | "amazonBedrock" | "gcp") or null.
 export const accountSchema = z.object({
-  account: z.object({ type: z.string() }).nullable(),
+  account: z.object({ type: z.string() }).nullish(),
 });
 
 // Unix timestamp in seconds.
@@ -55,12 +58,13 @@ export const rateLimitCreditsSchema = z.object({
             resetType: z.enum(["codexRateLimits", "unknown"]).catch("unknown"),
             status: z.enum(["available", "redeeming", "redeemed", "unknown"]).catch("unknown"),
             grantedAt: timestampSchema,
-            expiresAt: timestampSchema.nullable(),
+            expiresAt: timestampSchema.nullish().transform((expiresAt) => expiresAt ?? null),
           }),
         )
-        .nullable(),
+        .nullish()
+        .transform((credits) => credits ?? null),
     })
-    .nullable()
+    .nullish()
     .transform((summary) => summary ?? { availableCount: 0, credits: [] }),
 });
 export type RateLimitCredits = z.output<typeof rateLimitCreditsSchema>;
