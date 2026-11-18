@@ -60,18 +60,17 @@ describe("redemption event history", () => {
     ).toHaveLength(1);
   });
 
-  it.each([
-    "nothingToReset",
-    "noCredit",
-    "alreadyRedeemed",
-  ] as const)("does not label %s as a reset", async (outcome) => {
-    const f = fixture();
-    f.client.consumeCredit.mockResolvedValue({ outcome });
-    await checkCredits(f.client, 360, f.log, () => now);
-    expect(f.events().filter((event) => event.event === "credit_redemption_result")).toHaveLength(1);
-    expect(f.events().find((event) => event.event === "credit_redemption_result").outcome).toBe(outcome);
-    expect(f.events().filter((event) => event.outcome === "reset")).toHaveLength(0);
-  });
+  it.each(["nothingToReset", "noCredit", "alreadyRedeemed"] as const)(
+    "does not label %s as a reset",
+    async (outcome) => {
+      const f = fixture();
+      f.client.consumeCredit.mockResolvedValue({ outcome });
+      await checkCredits(f.client, 360, f.log, () => now);
+      expect(f.events().filter((event) => event.event === "credit_redemption_result")).toHaveLength(1);
+      expect(f.events().find((event) => event.event === "credit_redemption_result").outcome).toBe(outcome);
+      expect(f.events().filter((event) => event.outcome === "reset")).toHaveLength(0);
+    },
+  );
 
   it("records all failed attempts without inventing a result or dumping the error", async () => {
     const f = fixture();
