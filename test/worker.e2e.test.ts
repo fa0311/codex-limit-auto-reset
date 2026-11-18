@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 // These tests run the real entry points against a scripted stand-in for `codex app-server`.
 const root = fileURLToPath(new URL("..", import.meta.url));
 const fakeCodex = join(root, "test/fixtures/fake-codex.mjs");
+const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 const credit = (id: string, expiresInMinutes: number) => ({
   id,
@@ -112,6 +113,48 @@ describe("worker", () => {
       expect.objectContaining({ event: "check_failed", operation: "initialize", error_type: "app_server_exited" }),
     ]);
     expect(stderr).toBe("");
+    expect(exitCode).toBe(1);
+  });
+});
+
+describe("commands", () => {
+  const scenario = {
+    credits: { availableCount: 2, credits: [credit("later", 600), credit("sooner", 30)] },
+    consume: ["nothingToReset"],
+  };
+
+  it("cli lists the credits without redeeming any", async () => {
+    const { exitCode, stdout } = await start("cli.ts", scenario);
+    expect(stdout).toContain("sooner");
+    expect(stdout).toContain("later");
+    expect(exitCode).toBe(0);
+    expect((await requests()).map(({ method }) => method)).not.toContain("account/rateLimitResetCredit/consume");
+  });
+
+  it("reset redeems the credit that expires first once confirmed", async () => {
+    const command = start("reset.ts", scenario);
+    command.stdin.end("y\n");
+    const { exitCode, stdout } = await command;
+    expect(stdout).toContain("Credit sooner: nothingToReset");
+    expect(exitCode).toBe(0);
+    expect((await requests()).at(-1)).toMatchObject({
+      method: "account/rateLimitResetCredit/consume",
+      params: { creditId: "sooner", idempotencyKey: expect.stringMatching(uuid) },
+    });
+  });
+
+  it("reset redeems nothing unless confirmed", async () => {
+    const command = start("reset.ts", scenario);
+    command.stdin.end("\n");
+    const { exitCode, stdout } = await command;
+    expect(stdout).toContain("No credit was redeemed.");
+    expect(exitCode).toBe(0);
+    expect((await requests()).map(({ method }) => method)).not.toContain("account/rateLimitResetCredit/consume");
+  });
+
+  it("explains a failure in one line", async () => {
+    const { exitCode, stderr } = await start("cli.ts", { account: null });
+    expect(stderr).toBe("Error: Codex CLI is not authenticated with ChatGPT");
     expect(exitCode).toBe(1);
   });
 });
