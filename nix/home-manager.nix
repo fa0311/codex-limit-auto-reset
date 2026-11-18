@@ -33,6 +33,18 @@ in
       description = "The Codex CLI package used to redeem credits.";
     };
 
+    resetRemainingPercent = lib.mkOption {
+      type = lib.types.nullOr (lib.types.ints.between 0 20);
+      default = null;
+      description = "Redeem one reset when a main Codex allowance has this percentage or less remaining. Null disables usage monitoring.";
+    };
+
+    usagePollSeconds = lib.mkOption {
+      type = lib.types.ints.between 10 3600;
+      default = 60;
+      description = "Usage polling interval when resetRemainingPercent is enabled.";
+    };
+
     redeemBeforeMinutes = lib.mkOption {
       type = lib.types.ints.positive;
       default = 360;
@@ -50,7 +62,12 @@ in
           "CODEX_BIN=${lib.getExe cfg.codexPackage}"
           "CODEX_HOME=${cfg.codexHome}"
           "REDEEM_BEFORE_MINUTES=${toString cfg.redeemBeforeMinutes}"
-        ];
+          "USAGE_POLL_SECONDS=${toString cfg.usagePollSeconds}"
+          "STATE_FILE=${config.xdg.stateHome}/codex-limit-auto-reset/recovery.json"
+        ]
+        ++ lib.optional (
+          cfg.resetRemainingPercent != null
+        ) "RESET_REMAINING_PERCENT=${toString cfg.resetRemainingPercent}";
         Restart = "on-failure";
         RestartSec = "10s";
       };

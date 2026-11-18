@@ -148,6 +148,8 @@ Import `inputs.codex-limit-auto-reset.homeManagerModules.default` and enable:
 services.codex-limit-auto-reset = {
   enable = true;
   redeemBeforeMinutes = 360;
+  resetRemainingPercent = 3; # null (default) disables usage monitoring
+  usagePollSeconds = 60;
   # codexPackage = pkgs.codex;
   # codexHome = "${config.home.homeDirectory}/.codex";
 };
