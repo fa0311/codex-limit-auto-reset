@@ -13,7 +13,8 @@ RUN pnpm prune --prod
 
 FROM node:24-bookworm-slim AS runtime
 
-RUN npm install --global @openai/codex@0.144.1
+ARG CODEX_VERSION=0.169.0
+RUN npm install --global @openai/codex@${CODEX_VERSION}
 
 ENV CODEX_HOME=/data/codex
 ENV REDEEM_BEFORE_MINUTES=360
