@@ -84,6 +84,28 @@ describe("worker", () => {
     expect((await requests()).at(-1).params).toEqual({ creditId: "due", idempotencyKey: expect.stringMatching(uuid) });
   });
 
+  it("comes back for a credit that had nothing to reset", async () => {
+    const worker = start("main.ts", {
+      credits: { availableCount: 1, credits: [credit("due", 30)] },
+      consume: ["nothingToReset"],
+    });
+    for await (const line of worker) {
+      if (JSON.parse(line).event === "next_check") {
+        worker.kill("SIGTERM");
+      }
+    }
+    const { stdout } = await worker;
+    expect(events(stdout)).toEqual([
+      expect.objectContaining({ event: "credit_redemption_attempt", credit_id: "due" }),
+      expect.objectContaining({ event: "credit_redemption_result", credit_id: "due", outcome: "nothingToReset" }),
+      expect.objectContaining({ event: "next_check" }),
+    ]);
+    // Half of the 30 minutes the credit has left.
+    const { delay_ms } = events(stdout).at(-1);
+    expect(delay_ms).toBeGreaterThan(14 * 60_000);
+    expect(delay_ms).toBeLessThanOrEqual(15 * 60_000);
+  });
+
   it("stops at once, saying so, when Codex is logged out", async () => {
     const { exitCode, stdout } = await start("main.ts", { account: null });
     expect(events(stdout)).toEqual([
