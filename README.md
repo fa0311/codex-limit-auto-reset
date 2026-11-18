@@ -75,10 +75,11 @@ Events:
 
 Count **only** `credit_redemption_result` with `outcome: "reset"` as confirmed
 resets. `nothingToReset`, `noCredit`, and `alreadyRedeemed` are separate results;
-failed attempts are not resets. Retries keep the credit ID as the idempotency key.
-If a reset succeeds remotely but its response is lost, a later `alreadyRedeemed`
-response cannot prove that this worker performed the reset; it is not counted as
-one. Logs report observed outcomes, not a transactional audit trail.
+failed attempts are not resets. Each redemption attempt has its own idempotency
+key (a UUID), which only the retries of that attempt reuse. If a reset succeeds
+remotely but its response is lost, a later `alreadyRedeemed` response cannot
+prove that this worker performed the reset; it is not counted as one. Logs
+report observed outcomes, not a transactional audit trail.
 
 A failure is an `error_type`, plus a one-line `detail` when the worker
 recognises the problem:

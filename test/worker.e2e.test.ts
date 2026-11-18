@@ -81,6 +81,7 @@ describe("worker", () => {
       "account/rateLimits/read",
       "account/rateLimitResetCredit/consume",
     ]);
+    expect((await requests()).at(-1).params).toEqual({ creditId: "due", idempotencyKey: expect.stringMatching(uuid) });
   });
 
   it("stops at once, saying so, when Codex is logged out", async () => {

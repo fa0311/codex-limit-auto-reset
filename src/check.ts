@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { CodexClient } from "./codex-client.ts";
 import { describeError } from "./errors.ts";
 import type { Logger } from "./log.ts";
@@ -27,12 +28,14 @@ export const checkCredits = async (
   const creditsToReset = credits.filter((credit) => credit.expiresAtMs - redeemBeforeMs <= now());
 
   for (const credit of creditsToReset) {
+    // One key per redemption attempt, shared by its retries only, as the app-server protocol asks.
+    const idempotencyKey = randomUUID();
     let attempt = 0;
     const { outcome } = await retry(async () => {
       attempt += 1;
       log({ event: "credit_redemption_attempt", credit_id: credit.id, attempt });
       try {
-        return await client.consumeCredit(credit.id, credit.id);
+        return await client.consumeCredit(credit.id, idempotencyKey);
       } catch (error) {
         log({ event: "credit_redemption_error", credit_id: credit.id, attempt, ...describeError(error) });
         throw error;

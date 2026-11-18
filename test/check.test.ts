@@ -7,6 +7,7 @@ import { createLogger } from "../src/log.ts";
 // retry() pauses between attempts; the tests do not wait for it.
 vi.mock("node:timers/promises", () => ({ setTimeout: vi.fn(async () => {}) }));
 
+const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const now = 1_800_000_000_000;
 const hour = 60 * 60 * 1000;
 const credit = (id: string, offset: number, status = "available") => ({
@@ -39,10 +40,9 @@ describe("redemption event history", () => {
     const f = fixture();
     f.client.consumeCredit.mockRejectedValueOnce(new Error("token=secret-auth-value"));
     expect(await checkCredits(f.client, 360, f.log, () => now)).toBe(24 * hour);
-    expect(f.client.consumeCredit.mock.calls).toEqual([
-      ["credit-1", "credit-1"],
-      ["credit-1", "credit-1"],
-    ]);
+    const [first, retried] = f.client.consumeCredit.mock.calls;
+    expect(first).toEqual(["credit-1", expect.stringMatching(uuid)]);
+    expect(retried).toEqual(first);
     expect(f.events().map((event) => event.event)).toEqual([
       "credit_redemption_attempt",
       "credit_redemption_error",
@@ -102,7 +102,7 @@ describe("redemption event history", () => {
       credit("used", hour, "redeemed"),
     ]);
     expect(await checkCredits(f.client, 360, f.log, () => now)).toBe(2 * hour);
-    expect(f.client.consumeCredit.mock.calls).toEqual([["due", "due"]]);
+    expect(f.client.consumeCredit.mock.calls).toEqual([["due", expect.stringMatching(uuid)]]);
     expect(f.events().at(-1)).toMatchObject({ event: "next_check", delay_ms: 2 * hour });
   });
 
@@ -112,6 +112,16 @@ describe("redemption event history", () => {
     expect(f.client.consumeCredit).not.toHaveBeenCalled();
     expect(f.events()).toHaveLength(1);
     expect(f.events()[0]).toMatchObject({ event: "next_check", delay_ms: 24 * hour });
+  });
+
+  it("uses a new idempotency key for each later attempt on the same credit", async () => {
+    const f = fixture();
+    f.client.consumeCredit.mockResolvedValue({ outcome: "nothingToReset" });
+    await checkCredits(f.client, 360, f.log, () => now);
+    await checkCredits(f.client, 360, f.log, () => now);
+    const keys = f.client.consumeCredit.mock.calls.map(([, key]) => key);
+    expect(keys).toHaveLength(2);
+    expect(keys[0]).not.toBe(keys[1]);
   });
 
   it("classifies an app-server error and does not repeat a request it will never accept", async () => {
