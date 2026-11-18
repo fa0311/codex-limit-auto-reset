@@ -1,55 +1,40 @@
-import { createCodexClient } from "./codex-client.ts";
-import { parseConfig } from "./config.ts";
-import { parseLocale } from "./locale.ts";
+import { randomUUID } from "node:crypto";
+import { createInterface } from "node:readline/promises";
+import { runCommand } from "./command.ts";
+import { formatExpiry, parseLocale } from "./locale.ts";
 
-const locale = parseLocale(process.env);
-const config = parseConfig(process.env);
-const client = createCodexClient({
-  command: config.CODEX_BIN,
-  clientInfo: {
-    name: "codex_limit_auto_reset",
-    title: "Codex Limit Auto Reset",
-    version: "0.1.0",
-  },
-});
-
-await client.initialize();
-
-await client.refreshAccount();
-const credits = await client.readCredits();
-
-const validCredits = credits.rateLimitResetCredits.credits.filter(
-  (credit) => credit.status === "available" && credit.resetType === "codexRateLimits",
-);
-const nearestResetCredit = validCredits.sort((a, b) => (a.expiresAt ?? Infinity) - (b.expiresAt ?? Infinity));
-
-console.table(
-  nearestResetCredit.map((credit) => ({
-    id: credit.id,
-    status: credit.status,
-    resetType: credit.resetType,
-    expiresAt:
-      credit.expiresAt === null
-        ? "never"
-        : new Date(credit.expiresAt * 1000).toLocaleString(locale.LOCAL, { timeZone: locale.TIMEZONE }),
-  })),
-);
-
-console.log(`Do you want to use the first credit? (y/n)`);
-const input = await new Promise<boolean>((resolve) => {
-  process.stdin.once("data", (data) => {
-    resolve(data.toString().trim().toLowerCase() === "y");
-  });
-});
-console.log(input);
-if (input) {
-  const creditId = nearestResetCredit.at(0)?.id;
-  if (creditId) {
-    await client.consumeCredit(creditId, creditId);
-    console.log(`Used credit ${creditId}`);
+await runCommand(async (client) => {
+  const locale = parseLocale(process.env);
+  const { credits } = (await client.readCredits()).rateLimitResetCredits;
+  const redeemable = credits
+    .filter(
+      (credit) =>
+        credit.status === "available" &&
+        credit.resetType === "codexRateLimits" &&
+        (credit.expiresAt === null || credit.expiresAt * 1000 > Date.now()),
+    )
+    .sort((a, b) => (a.expiresAt ?? Infinity) - (b.expiresAt ?? Infinity));
+  const [next] = redeemable;
+  if (!next) {
+    console.log("No redeemable reset credits.");
+    return;
   }
-} else {
-  console.log(`Credit not used`);
-}
+  console.table(
+    redeemable.map((credit) => ({
+      id: credit.id,
+      status: credit.status,
+      resetType: credit.resetType,
+      expiresAt: formatExpiry(credit.expiresAt, locale),
+    })),
+  );
 
-client.close();
+  const prompt = createInterface({ input: process.stdin, output: process.stdout });
+  const answer = await prompt.question("Redeem the first credit now? (y/N) ");
+  prompt.close();
+  if (answer.trim().toLowerCase() !== "y") {
+    console.log("No credit was redeemed.");
+    return;
+  }
+  const { outcome } = await client.consumeCredit(next.id, randomUUID());
+  console.log(`Credit ${next.id}: ${outcome}`);
+});

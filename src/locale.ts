@@ -7,3 +7,8 @@ const localeSchema = z.object({
 });
 
 export const parseLocale = (environment: NodeJS.ProcessEnv) => parseEnvironment(localeSchema, environment);
+
+type Locale = ReturnType<typeof parseLocale>;
+
+export const formatExpiry = (expiresAt: number | null, locale: Locale) =>
+  expiresAt === null ? "never" : new Date(expiresAt * 1000).toLocaleString(locale.LOCAL, { timeZone: locale.TIMEZONE });

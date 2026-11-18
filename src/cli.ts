@@ -1,31 +1,23 @@
-import { createCodexClient } from "./codex-client.ts";
-import { parseConfig } from "./config.ts";
-import { parseLocale } from "./locale.ts";
+import { runCommand } from "./command.ts";
+import { formatExpiry, parseLocale } from "./locale.ts";
 
-const locale = parseLocale(process.env);
-const config = parseConfig(process.env);
-const client = createCodexClient({
-  command: config.CODEX_BIN,
-  clientInfo: {
-    name: "codex_limit_auto_reset",
-    title: "Codex Limit Auto Reset",
-    version: "0.1.0",
-  },
+await runCommand(async (client) => {
+  const locale = parseLocale(process.env);
+  const { availableCount, credits } = (await client.readCredits()).rateLimitResetCredits;
+  if (credits.length === 0) {
+    console.log(
+      availableCount > 0
+        ? `${availableCount} reset credit(s) available, but their details could not be loaded. Try again shortly.`
+        : "No reset credits.",
+    );
+    return;
+  }
+  console.table(
+    credits.map((credit) => ({
+      id: credit.id,
+      status: credit.status,
+      resetType: credit.resetType,
+      expiresAt: formatExpiry(credit.expiresAt, locale),
+    })),
+  );
 });
-
-await client.initialize();
-
-await client.refreshAccount();
-const credits = await client.readCredits();
-console.table(
-  credits.rateLimitResetCredits.credits.map((credit) => ({
-    id: credit.id,
-    status: credit.status,
-    resetType: credit.resetType,
-    expiresAt:
-      credit.expiresAt === null
-        ? "never"
-        : new Date(credit.expiresAt * 1000).toLocaleString(locale.LOCAL, { timeZone: locale.TIMEZONE }),
-  })),
-);
-client.close();

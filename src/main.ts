@@ -1,5 +1,7 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import { checkCredits } from "./check.ts";
+import { clientInfo } from "./client-info.ts";
+import type { CodexClient } from "./codex-client.ts";
 import { createCodexClient } from "./codex-client.ts";
 import { parseConfig } from "./config.ts";
 import { describeError } from "./errors.ts";
@@ -16,18 +18,11 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
   });
 }
 
-let client: ReturnType<typeof createCodexClient> | undefined;
+let client: CodexClient | undefined;
 let operation: "initialize" | "check" = "initialize";
 try {
   const config = parseConfig(process.env);
-  client = createCodexClient({
-    command: config.CODEX_BIN,
-    clientInfo: {
-      name: "codex_limit_auto_reset",
-      title: "Codex Limit Auto Reset",
-      version: "0.1.0",
-    },
-  });
+  client = createCodexClient({ command: config.CODEX_BIN, clientInfo });
   await client.initialize();
   operation = "check";
   while (!shutdown.signal.aborted) {

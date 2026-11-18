@@ -13,6 +13,7 @@
     "dev:reset": "node --env-file-if-exists=.env src/reset.ts",
     "start": "node --env-file-if-exists=.env src/main.ts",
     "start:cli": "node --env-file-if-exists=.env src/cli.ts",
+    "start:reset": "node --env-file-if-exists=.env src/reset.ts",
     "build": "tsc -p tsconfig.build.json",
     "check": "pnpm typecheck && pnpm lint && pnpm test",
     "format": "biome format --write .",
