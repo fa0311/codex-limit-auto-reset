@@ -43,6 +43,23 @@ docker exec codex-limit-auto-reset node dist/cli.js
 docker exec -it codex-limit-auto-reset node dist/reset.js
 ```
 
+## How credits are redeemed
+
+A credit becomes due `REDEEM_BEFORE_MINUTES` before it expires. At each check
+the worker redeems the due credit that expires first:
+
+- `reset`: the usage is reset, and the check ends. A second due credit would
+  find nothing left to reset, so it waits for a later check.
+- `nothingToReset`: the usage does not need a reset right now, and the credit is
+  kept. The worker tries again after half of the time the credit has left (at
+  most once a minute), so the attempts close in on the expiry.
+- `noCredit` or `alreadyRedeemed`: the credit is gone, and the worker moves on to
+  the next due credit.
+
+Between checks the worker sleeps until the next credit becomes due, and wakes at
+least once a day to pick up newly granted credits. Credits that never expire are
+left alone.
+
 ## Configuration
 
 The following environment variables are available:

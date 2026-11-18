@@ -114,16 +114,6 @@ describe("redemption event history", () => {
     expect(f.events()[0]).toMatchObject({ event: "next_check", delay_ms: 24 * hour });
   });
 
-  it("uses a new idempotency key for each later attempt on the same credit", async () => {
-    const f = fixture();
-    f.client.consumeCredit.mockResolvedValue({ outcome: "nothingToReset" });
-    await checkCredits(f.client, 360, f.log, () => now);
-    await checkCredits(f.client, 360, f.log, () => now);
-    const keys = f.client.consumeCredit.mock.calls.map(([, key]) => key);
-    expect(keys).toHaveLength(2);
-    expect(keys[0]).not.toBe(keys[1]);
-  });
-
   it("classifies an app-server error and does not repeat a request it will never accept", async () => {
     const f = fixture();
     f.client.consumeCredit.mockRejectedValue(new CodexError("rpc_error", "consume failed (-32600): no", false));
@@ -138,5 +128,45 @@ describe("redemption event history", () => {
         detail: "consume failed (-32600): no",
       }),
     ]);
+  });
+});
+
+describe("credits inside the redeem window", () => {
+  it("keeps trying a credit that had nothing to reset, with a new idempotency key each time", async () => {
+    const f = fixture();
+    f.client.consumeCredit.mockResolvedValue({ outcome: "nothingToReset" });
+    expect(await checkCredits(f.client, 360, f.log, () => now)).toBe(hour / 2);
+    expect(await checkCredits(f.client, 360, f.log, () => now + hour / 2)).toBe(hour / 4);
+    const keys = f.client.consumeCredit.mock.calls.map(([, key]) => key);
+    expect(keys).toHaveLength(2);
+    expect(keys[0]).not.toBe(keys[1]);
+  });
+
+  it("spends the credit that expires first and leaves the rest for the next check", async () => {
+    const f = fixture([credit("later", 2 * hour), credit("sooner", hour)]);
+    expect(await checkCredits(f.client, 360, f.log, () => now)).toBe(hour);
+    expect(f.client.consumeCredit.mock.calls.map(([id]) => id)).toEqual(["sooner"]);
+  });
+
+  it.each(["alreadyRedeemed", "noCredit"] as const)(
+    "moves on to the next credit when one is reported as %s",
+    async (outcome) => {
+      const f = fixture([credit("gone", hour), credit("usable", 2 * hour)]);
+      f.client.consumeCredit.mockResolvedValueOnce({ outcome });
+      expect(await checkCredits(f.client, 360, f.log, () => now)).toBe(24 * hour);
+      expect(f.client.consumeCredit.mock.calls.map(([id]) => id)).toEqual(["gone", "usable"]);
+    },
+  );
+
+  it("closes in on the expiry, but checks at most once a minute", async () => {
+    const f = fixture([credit("due", 90_000)]);
+    f.client.consumeCredit.mockResolvedValue({ outcome: "nothingToReset" });
+    expect(await checkCredits(f.client, 360, f.log, () => now)).toBe(60_000);
+  });
+
+  it("does not wait past the redeem time of a later credit", async () => {
+    const f = fixture([credit("due", hour), credit("soon", 6 * hour + 60_000)]);
+    f.client.consumeCredit.mockResolvedValue({ outcome: "nothingToReset" });
+    expect(await checkCredits(f.client, 360, f.log, () => now)).toBe(60_000);
   });
 });
