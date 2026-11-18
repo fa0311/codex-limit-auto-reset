@@ -1,9 +1,10 @@
-import type { createCodexClient } from "./codex-client.ts";
+import type { CodexClient } from "./codex-client.ts";
+import { describeError } from "./errors.ts";
 import type { Logger } from "./log.ts";
 import { retry } from "./retry.ts";
 
 const RESCAN_INTERVAL_MS = 24 * 60 * 60 * 1000;
-type Client = Pick<ReturnType<typeof createCodexClient>, "refreshAccount" | "readCredits" | "consumeCredit">;
+type Client = Pick<CodexClient, "refreshAccount" | "readCredits" | "consumeCredit">;
 
 export const checkCredits = async (
   client: Client,
@@ -33,8 +34,7 @@ export const checkCredits = async (
       try {
         return await client.consumeCredit(credit.id, credit.id);
       } catch (error) {
-        // Errors may contain authentication or RPC data. Record only safe metadata.
-        log({ event: "credit_redemption_error", credit_id: credit.id, attempt, error_type: "operation_failed" });
+        log({ event: "credit_redemption_error", credit_id: credit.id, attempt, ...describeError(error) });
         throw error;
       }
     });

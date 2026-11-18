@@ -46,6 +46,9 @@ const createHarness = () => {
     respond: (id: number, result: unknown) => {
       stdout.write(`${JSON.stringify({ id, result })}\n`);
     },
+    write: (line: string) => {
+      stdout.write(`${line}\n`);
+    },
   };
 };
 
@@ -135,5 +138,57 @@ describe("createCodexClient", () => {
     harness.exit("crashed");
     await expect(pending).rejects.toThrow("Codex app-server exited: crashed");
     await expect(harness.client.readCredits()).rejects.toThrow("Codex app-server exited: crashed");
+  });
+
+  it("rejects with the error app-server returns instead of waiting for the timeout", async () => {
+    const harness = createHarness();
+    const reading = harness.client.readCredits();
+    await harness.line(0);
+    harness.write(JSON.stringify({ error: { code: -32603, message: "failed to fetch rate limits" }, id: 1 }));
+    await expect(reading).rejects.toMatchObject({
+      type: "rpc_error",
+      message: "account/rateLimits/read failed (-32603): failed to fetch rate limits",
+      retryable: true,
+    });
+  });
+
+  it("marks a request app-server will never accept as not worth retrying", async () => {
+    const harness = createHarness();
+    const consuming = harness.client.consumeCredit("RateLimitResetCredit_abc", "key-1");
+    await harness.line(0);
+    harness.write(JSON.stringify({ error: { code: -32600, message: "authentication required" }, id: 1 }));
+    await expect(consuming).rejects.toMatchObject({ type: "rpc_error", retryable: false });
+  });
+
+  it("skips notifications between a request and its response", async () => {
+    const harness = createHarness();
+    const reading = harness.client.readCredits();
+    await harness.line(0);
+    harness.write(JSON.stringify({ method: "account/rateLimits/updated", params: {}, emittedAtMs: 1 }));
+    harness.respond(1, creditsResult);
+    expect((await reading).rateLimitResetCredits.availableCount).toBe(1);
+  });
+
+  it("names the field when a response does not have the expected shape", async () => {
+    const harness = createHarness();
+    const reading = harness.client.readCredits();
+    await harness.line(0);
+    harness.respond(1, { rateLimitResetCredits: { availableCount: "secret-value", credits: null } });
+    const failure = await reading.catch((error: unknown) => error);
+    expect(failure).toMatchObject({ type: "invalid_response", retryable: false });
+    expect((failure as Error).message).toContain("account/rateLimits/read");
+    expect((failure as Error).message).toContain("rateLimitResetCredits.availableCount");
+    expect((failure as Error).message).not.toContain("secret-value");
+  });
+
+  it("fails every request, without quoting the line, once the output cannot be parsed", async () => {
+    const harness = createHarness();
+    const pending = harness.client.readCredits();
+    await harness.line(0);
+    harness.write("secret-token is not JSON");
+    const failure = await pending.catch((error: unknown) => error);
+    expect(failure).toMatchObject({ type: "invalid_response" });
+    expect((failure as Error).message).not.toContain("secret-token");
+    await expect(harness.client.readCredits()).rejects.toBe(failure);
   });
 });
