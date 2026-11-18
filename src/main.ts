@@ -1,3 +1,4 @@
+import { setTimeout as sleep } from "node:timers/promises";
 import { checkCredits } from "./check.ts";
 import { createCodexClient } from "./codex-client.ts";
 import { parseConfig } from "./config.ts";
@@ -5,6 +6,16 @@ import { describeError } from "./errors.ts";
 import { createLogger } from "./log.ts";
 
 const log = createLogger();
+
+// As PID 1 in a container Node ignores SIGTERM unless it is handled, so `docker stop` would hang.
+// The listeners stay registered: execa re-raises a signal once nothing else is listening for it.
+const shutdown = new AbortController();
+for (const signal of ["SIGINT", "SIGTERM"] as const) {
+  process.on(signal, () => {
+    shutdown.abort();
+  });
+}
+
 let client: ReturnType<typeof createCodexClient> | undefined;
 let operation: "initialize" | "check" = "initialize";
 try {
@@ -19,13 +30,16 @@ try {
   });
   await client.initialize();
   operation = "check";
-  while (true) {
+  while (!shutdown.signal.aborted) {
     const nextCheckInMs = await checkCredits(client, config.REDEEM_BEFORE_MINUTES, log);
-    await new Promise((resolve) => setTimeout(resolve, nextCheckInMs));
+    await sleep(nextCheckInMs, undefined, { signal: shutdown.signal });
   }
 } catch (error) {
-  log({ event: "check_failed", operation, ...describeError(error) });
-  process.exitCode = 1;
+  // A shutdown interrupts the sleep, and Ctrl-C also stops app-server mid-request: neither is a failure.
+  if (!shutdown.signal.aborted) {
+    log({ event: "check_failed", operation, ...describeError(error) });
+    process.exitCode = 1;
+  }
 } finally {
   client?.close();
 }
