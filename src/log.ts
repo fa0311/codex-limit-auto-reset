@@ -1,11 +1,13 @@
 import type { ConsumeCredit } from "./codex-schemas.ts";
+import type { ErrorType } from "./errors.ts";
 
 type CreditAttempt = { credit_id: string; attempt: number };
+type Failure = { error_type: ErrorType; detail?: string };
 export type LogEvent =
   | ({ event: "credit_redemption_attempt" } & CreditAttempt)
   | ({ event: "credit_redemption_result"; outcome: ConsumeCredit["outcome"] } & CreditAttempt)
-  | ({ event: "credit_redemption_error"; error_type: "operation_failed" } & CreditAttempt)
-  | { event: "check_failed"; operation: "initialize" | "check"; error_type: "operation_failed" }
+  | ({ event: "credit_redemption_error" } & CreditAttempt & Failure)
+  | ({ event: "check_failed"; operation: "initialize" | "check" } & Failure)
   | { event: "next_check"; delay_ms: number };
 
 export type Logger = (event: LogEvent) => void;

@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import { checkCredits } from "../src/check.ts";
 import type { ConsumeCredit, RateLimitCredits } from "../src/codex-schemas.ts";
+import { CodexError } from "../src/errors.ts";
 import { createLogger } from "../src/log.ts";
+
+// retry() pauses between attempts; the tests do not wait for it.
+vi.mock("node:timers/promises", () => ({ setTimeout: vi.fn(async () => {}) }));
 
 const now = 1_800_000_000_000;
 const hour = 60 * 60 * 1000;
@@ -108,5 +112,21 @@ describe("redemption event history", () => {
     expect(f.client.consumeCredit).not.toHaveBeenCalled();
     expect(f.events()).toHaveLength(1);
     expect(f.events()[0]).toMatchObject({ event: "next_check", delay_ms: 24 * hour });
+  });
+
+  it("classifies an app-server error and does not repeat a request it will never accept", async () => {
+    const f = fixture();
+    f.client.consumeCredit.mockRejectedValue(new CodexError("rpc_error", "consume failed (-32600): no", false));
+    await expect(checkCredits(f.client, 360, f.log, () => now)).rejects.toThrow("All attempts failed");
+    expect(f.client.consumeCredit).toHaveBeenCalledOnce();
+    expect(f.events()).toEqual([
+      expect.objectContaining({ event: "credit_redemption_attempt", attempt: 1 }),
+      expect.objectContaining({
+        event: "credit_redemption_error",
+        level: "error",
+        error_type: "rpc_error",
+        detail: "consume failed (-32600): no",
+      }),
+    ]);
   });
 });

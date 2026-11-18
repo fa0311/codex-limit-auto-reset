@@ -1,6 +1,7 @@
 import { checkCredits } from "./check.ts";
 import { createCodexClient } from "./codex-client.ts";
 import { parseConfig } from "./config.ts";
+import { describeError } from "./errors.ts";
 import { createLogger } from "./log.ts";
 
 const log = createLogger();
@@ -22,9 +23,8 @@ try {
     const nextCheckInMs = await checkCredits(client, config.REDEEM_BEFORE_MINUTES, log);
     await new Promise((resolve) => setTimeout(resolve, nextCheckInMs));
   }
-} catch {
-  // Avoid dumping raw errors, which may include authentication or RPC payloads.
-  log({ event: "check_failed", operation, error_type: "operation_failed" });
+} catch (error) {
+  log({ event: "check_failed", operation, ...describeError(error) });
   process.exitCode = 1;
 } finally {
   client?.close();
