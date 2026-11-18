@@ -17,13 +17,13 @@ const credit = (id: string, offset: number, status = "available") => ({
   resetType: "codexRateLimits" as const,
   status: status as "available" | "redeemed",
 });
-const fixture = (credits = [credit("credit-1", hour)]) => {
+const fixture = (credits = [credit("credit-1", hour)], availableCount = credits.length) => {
   const lines: string[] = [];
   const client = {
     refreshAccount: vi.fn(async () => {}),
     readCredits: vi.fn(
       async (): Promise<RateLimitCredits> => ({
-        rateLimitResetCredits: { availableCount: credits.length, credits },
+        rateLimitResetCredits: { availableCount, credits },
       }),
     ),
     consumeCredit: vi.fn(async (_id: string, _key: string): Promise<ConsumeCredit> => ({ outcome: "reset" })),
@@ -168,5 +168,17 @@ describe("credits inside the redeem window", () => {
     const f = fixture([credit("due", hour), credit("soon", 6 * hour + 60_000)]);
     f.client.consumeCredit.mockResolvedValue({ outcome: "nothingToReset" });
     expect(await checkCredits(f.client, 360, f.log, () => now)).toBe(60_000);
+  });
+});
+
+describe("credit details", () => {
+  it("looks again soon when app-server reports available credits without their details", async () => {
+    const f = fixture([], 2);
+    expect(await checkCredits(f.client, 360, f.log, () => now)).toBe(10 * 60 * 1000);
+    expect(f.client.consumeCredit).not.toHaveBeenCalled();
+    expect(f.events()).toEqual([
+      expect.objectContaining({ event: "credit_details_unavailable", level: "warn", available_count: 2 }),
+      expect.objectContaining({ event: "next_check", delay_ms: 10 * 60 * 1000 }),
+    ]);
   });
 });
